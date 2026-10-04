@@ -22,7 +22,7 @@ var (
 )
 
 type Customer struct {
-	ID    int    `gorm:"primaryKey;autoIncrement" json:"id"`
+	ID    string `gorm:"uuid" json:"uuid"`
 	Name  string `gorm:"not null" json:"name"`
 	Email string `gorm:"uniqueIndex;not null" json:"email"`
 }
@@ -62,13 +62,6 @@ func validateRequired(name, email string) error {
 	return nil
 }
 
-func validateName(name string) error {
-	if len(strings.Fields(name)) != 2 {
-		return errNameTwoWords
-	}
-	return nil
-}
-
 func mapCreateError(err error) error {
 	if err == nil {
 		return nil
@@ -94,12 +87,6 @@ func (h handlers) create(c echo.Context) error {
 	customer.Name = normalizeName(customer.Name)
 
 	if err := validateRequired(customer.Name, customer.Email); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-	}
-
-	if err := validateName(customer.Name); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": err.Error(),
 		})
