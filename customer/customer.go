@@ -22,7 +22,7 @@ var (
 )
 
 type Customer struct {
-	ID    string `gorm:"uuid" json:"uuid"`
+	ID    string `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name  string `gorm:"not null" json:"name"`
 	Email string `gorm:"uniqueIndex;not null" json:"email"`
 }

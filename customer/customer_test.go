@@ -150,8 +150,9 @@ func assertMockMet(t *testing.T, mock sqlmock.Sqlmock) {
 
 func TestCreate_Success(t *testing.T) {
 	h, mock := newTestHandlers(t)
-	mock.ExpectExec(`INSERT INTO "customers"`).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery(`INSERT INTO "customers"`).
+		WithArgs("Test User", "test@example.com").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("11111111-1111-4111-8111-111111111111"))
 
 	rec := postCustomer(t, h, `{"name":"test USer","email":"test@example.com"}`)
 
@@ -168,6 +169,9 @@ func TestCreate_Success(t *testing.T) {
 	}
 	if got.Email != "test@example.com" {
 		t.Errorf("email = %q, want %q", got.Email, "test@example.com")
+	}
+	if got.ID != "11111111-1111-4111-8111-111111111111" {
+		t.Errorf("id = %q, want database-generated UUID", got.ID)
 	}
 	assertMockMet(t, mock)
 }
@@ -216,7 +220,8 @@ func TestCreate_InvalidJSON(t *testing.T) {
 
 func TestCreate_DuplicateEmail(t *testing.T) {
 	h, mock := newTestHandlers(t)
-	mock.ExpectExec(`INSERT INTO "customers"`).
+	mock.ExpectQuery(`INSERT INTO "customers"`).
+		WithArgs("Test User", "dupe@example.com").
 		WillReturnError(&pq.Error{Code: "23505"})
 
 	rec := postCustomer(t, h, `{"name":"Test User","email":"dupe@example.com"}`)
@@ -232,7 +237,8 @@ func TestCreate_DuplicateEmail(t *testing.T) {
 
 func TestCreate_DatabaseFailure(t *testing.T) {
 	h, mock := newTestHandlers(t)
-	mock.ExpectExec(`INSERT INTO "customers"`).
+	mock.ExpectQuery(`INSERT INTO "customers"`).
+		WithArgs("Test User", "test@example.com").
 		WillReturnError(errors.New("connection refused"))
 
 	rec := postCustomer(t, h, `{"name":"Test User","email":"test@example.com"}`)
