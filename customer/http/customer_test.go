@@ -251,3 +251,124 @@ func TestCreate_DatabaseFailure(t *testing.T) {
 	}
 	assertMockMet(t, mock)
 }
+
+func findCustomer(t *testing.T, h handlers, id string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/customers/"+id, nil)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/customers/:id")
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+
+	if err := h.get(c); err != nil {
+		t.Fatalf("get returned error: %v", err)
+	}
+	return rec
+}
+
+func TestGet_CustomerFound(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+
+	rec := findCustomer(t, h, id)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var got Customer
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not valid customer JSON: %v", err)
+	}
+	if got.ID != id {
+		t.Errorf("id = %q, want %q", got.ID, id)
+	}
+	if got.Name != "Test User" {
+		t.Errorf("name = %q, want %q", got.Name, "Test User")
+	}
+	if got.Email != "test@example.com" {
+		t.Errorf("email = %q, want %q", got.Email, "test@example.com")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestGet_MissingUuid(t *testing.T) {
+	const id = ""
+
+	h, mock := newTestHandlers(t)
+
+	rec := findCustomer(t, h, id)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	if got := errorBody(t, rec); got != "invalid uuid" {
+		t.Errorf("error = %q, want %q", got, "invalid uuid")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestGet_InvalidUuid(t *testing.T) {
+	const id = "test"
+
+	h, mock := newTestHandlers(t)
+
+	rec := findCustomer(t, h, id)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	if got := errorBody(t, rec); got != "invalid uuid" {
+		t.Errorf("error = %q, want %q", got, "invalid uuid")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestGet_CustomerNotFound(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}))
+
+	rec := findCustomer(t, h, id)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := errorBody(t, rec); got != errCustomerNotFound.Error() {
+		t.Errorf("error = %q, want %q", got, errCustomerNotFound.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestGet_DatabaseFailure(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := findCustomer(t, h, id)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := errorBody(t, rec); got != errInternal.Error() {
+		t.Errorf("error = %q, want %q", got, errInternal.Error())
+	}
+	assertMockMet(t, mock)
+}
