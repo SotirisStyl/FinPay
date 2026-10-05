@@ -6,11 +6,13 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"FinPay/config"
+	"FinPay/customer/scopes"
 	"FinPay/services"
 )
 
@@ -19,6 +21,8 @@ var (
 	errNameEmailRequired = errors.New("name and email are required")
 	errEmailExists       = errors.New("email already exists")
 	errInternal          = errors.New("internal server error")
+	errCustomerNotFound  = errors.New("customer does not exist")
+	errInvalidUuid       = errors.New("invalid uuid")
 )
 
 type Customer struct {
@@ -106,4 +110,24 @@ func (h handlers) create(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusCreated, customer)
+}
+
+func (h handlers) get(c echo.Context) error {
+	var customer Customer
+	id := c.Param("id")
+
+	if err := uuid.Validate(id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidUuid.Error()})
+	}
+
+	result := h.DB.Scopes(scopes.ByID(id)).First(&customer)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errCustomerNotFound.Error()})
+	}
+
+	if result.Error != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+
+	return c.JSON(http.StatusOK, customer)
 }

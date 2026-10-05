@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"FinPay/config"
-	custhttp "FinPay/customer"
+	custhttp "FinPay/customer/http"
 )
 
 func newRouter(db *sql.DB) http.Handler {
