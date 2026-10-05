@@ -79,19 +79,6 @@ func mapCreateError(err error) error {
 	return errInternal
 }
 
-func mapExistError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	var pgErr *pq.Error
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return errCustomerNotFound
-	}
-
-	return errInternal
-}
-
 func (h handlers) create(c echo.Context) error {
 	var customer Customer
 
@@ -133,7 +120,7 @@ func (h handlers) get(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidUuid.Error()})
 	}
 
-	result := h.DB.Scopes(scopes.ById(id)).First(&customer)
+	result := h.DB.Scopes(scopes.ByID(id)).First(&customer)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": errCustomerNotFound.Error()})
 	}
