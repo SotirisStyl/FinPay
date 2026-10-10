@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo"
-	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"FinPay/config"
@@ -17,18 +16,24 @@ import (
 )
 
 var (
-	errNameTwoWords      = errors.New("customer name must be two words")
-	errNameEmailRequired = errors.New("name and email are required")
-	errEmailExists       = errors.New("email already exists")
-	errInternal          = errors.New("internal server error")
-	errCustomerNotFound  = errors.New("customer does not exist")
-	errInvalidUuid       = errors.New("invalid uuid")
+	errNameTwoWords          = errors.New("customer name must be two words")
+	errNameEmailRequired     = errors.New("name and email are required")
+	errEmailExists           = errors.New("email already exists")
+	errInternal              = errors.New("internal server error")
+	errCustomerNotFound      = errors.New("customer does not exist")
+	errInvalidUuid           = errors.New("invalid uuid")
+	errCustomerAlreadyExists = errors.New("customer already exist")
 )
 
 type Customer struct {
 	ID    string `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name  string `gorm:"not null" json:"name"`
 	Email string `gorm:"uniqueIndex;not null" json:"email"`
+}
+
+type customerUpdate struct {
+	Name  *string `json:"name"`
+	Email *string `json:"email"`
 }
 
 type handlers struct {
@@ -71,12 +76,30 @@ func mapCreateError(err error) error {
 		return nil
 	}
 
-	var pgErr *pq.Error
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	if isUniqueViolation(err) {
 		return errEmailExists
 	}
 
 	return errInternal
+}
+
+func mapUpdateError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if isUniqueViolation(err) {
+		return errEmailExists
+	}
+
+	return errInternal
+}
+
+func isUniqueViolation(err error) bool {
+	var sqlStateErr interface {
+		SQLState() string
+	}
+	return errors.As(err, &sqlStateErr) && sqlStateErr.SQLState() == "23505"
 }
 
 func (h handlers) create(c echo.Context) error {
@@ -127,6 +150,60 @@ func (h handlers) get(c echo.Context) error {
 
 	if result.Error != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+
+	return c.JSON(http.StatusOK, customer)
+}
+
+func (h handlers) update(c echo.Context) error {
+	var updates customerUpdate
+	id := c.Param("id")
+
+	if err := uuid.Validate(id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidUuid.Error()})
+	}
+
+	if err := c.Bind(&updates); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid input"})
+	}
+
+	if updates.Name == nil && updates.Email == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "at least one field (name or email) must be provided"})
+	}
+
+	var customer Customer
+	result := h.DB.Scopes(scopes.ByID(id)).First(&customer)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errCustomerNotFound.Error()})
+	}
+	if result.Error != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+
+	columns := make(map[string]interface{}, 2)
+	if updates.Name != nil {
+		customer.Name = normalizeName(*updates.Name)
+		columns["name"] = customer.Name
+	}
+	if updates.Email != nil {
+		customer.Email = *updates.Email
+		columns["email"] = customer.Email
+	}
+	if err := validateRequired(customer.Name, customer.Email); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if err := h.DB.Model(&customer).UpdateColumns(columns).Error; err != nil {
+		mapped := mapUpdateError(err)
+
+		status := http.StatusInternalServerError
+		if errors.Is(mapped, errEmailExists) {
+			status = http.StatusConflict
+		}
+
+		return c.JSON(status, map[string]string{
+			"error": mapped.Error(),
+		})
 	}
 
 	return c.JSON(http.StatusOK, customer)
