@@ -8,3 +8,9 @@ func ByID(id string) func(*gorm.DB) *gorm.DB {
 		return db.Where("customers.id = ?", id)
 	}
 }
+
+func ByEmail(email string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where("customers.email = ?", email)
+	}
+}

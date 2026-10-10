@@ -270,6 +270,24 @@ func findCustomer(t *testing.T, h handlers, id string) *httptest.ResponseRecorde
 	return rec
 }
 
+func patchCustomer(t *testing.T, h handlers, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/customers/"+id, strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/customers/:id")
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+
+	if err := h.update(c); err != nil {
+		t.Fatalf("update returned error: %v", err)
+	}
+	return rec
+}
+
 func TestGet_CustomerFound(t *testing.T) {
 	const id = "11111111-1111-4111-8111-111111111111"
 
@@ -363,6 +381,180 @@ func TestGet_DatabaseFailure(t *testing.T) {
 		WillReturnError(errors.New("connection refused"))
 
 	rec := findCustomer(t, h, id)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := errorBody(t, rec); got != errInternal.Error() {
+		t.Errorf("error = %q, want %q", got, errInternal.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_DuplicateEmailReturnsConflict(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Mary Smith", "old@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET`).
+		WithArgs("Mary Smith", "mary@gmail.com", id).
+		WillReturnError(&pq.Error{Code: "23505"})
+
+	rec := patchCustomer(t, h, id, `{"email":"mary@gmail.com"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if got := errorBody(t, rec); got != errEmailExists.Error() {
+		t.Errorf("error = %q, want %q", got, errEmailExists.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_EmailOnlyPreservesOtherFields(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Mary Smith", "old@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET`).
+		WithArgs("Mary Smith", "new@example.com", id).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	rec := patchCustomer(t, h, id, `{"email":"new@example.com"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var got Customer
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not valid customer JSON: %v", err)
+	}
+	if got.Name != "Mary Smith" {
+		t.Errorf("name = %q, want existing name %q", got.Name, "Mary Smith")
+	}
+	if got.Email != "new@example.com" {
+		t.Errorf("email = %q, want %q", got.Email, "new@example.com")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_NameAndEmail(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Mary Smith", "old@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET`).
+		WithArgs("Mary Jones", "new@example.com", id).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	rec := patchCustomer(t, h, id, `{"name":"mary jones","email":"new@example.com"}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var got Customer
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not valid customer JSON: %v", err)
+	}
+	if got.Name != "Mary Jones" {
+		t.Errorf("name = %q, want %q", got.Name, "Mary Jones")
+	}
+	if got.Email != "new@example.com" {
+		t.Errorf("email = %q, want %q", got.Email, "new@example.com")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_InvalidUUID(t *testing.T) {
+	h, mock := newTestHandlers(t)
+
+	rec := patchCustomer(t, h, "not-a-uuid", `{"email":"new@example.com"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if got := errorBody(t, rec); got != errInvalidUuid.Error() {
+		t.Errorf("error = %q, want %q", got, errInvalidUuid.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_InvalidJSON(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+
+	rec := patchCustomer(t, h, id, `{invalid json`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if got := errorBody(t, rec); got != "invalid input" {
+		t.Errorf("error = %q, want %q", got, "invalid input")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_CustomerNotFound(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}))
+
+	rec := patchCustomer(t, h, id, `{"email":"new@example.com"}`)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := errorBody(t, rec); got != errCustomerNotFound.Error() {
+		t.Errorf("error = %q, want %q", got, errCustomerNotFound.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_LookupDatabaseFailure(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := patchCustomer(t, h, id, `{"email":"new@example.com"}`)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := errorBody(t, rec); got != errInternal.Error() {
+		t.Errorf("error = %q, want %q", got, errInternal.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestUpdate_SaveDatabaseFailure(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Mary Smith", "old@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET`).
+		WithArgs("Mary Smith", "new@example.com", id).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := patchCustomer(t, h, id, `{"email":"new@example.com"}`)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
