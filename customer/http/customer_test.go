@@ -601,6 +601,23 @@ func TestUpdate_InvalidJSON(t *testing.T) {
 	assertMockMet(t, mock)
 }
 
+func TestUpdate_EmptyBodyReturnsBadRequest(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	const wantError = "at least one field (name or email) must be provided"
+
+	h, mock := newTestHandlers(t)
+
+	rec := patchCustomer(t, h, id, `{}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if got := errorBody(t, rec); got != wantError {
+		t.Errorf("error = %q, want %q", got, wantError)
+	}
+	assertMockMet(t, mock)
+}
+
 func TestUpdate_CustomerNotFound(t *testing.T) {
 	const id = "11111111-1111-4111-8111-111111111111"
 
