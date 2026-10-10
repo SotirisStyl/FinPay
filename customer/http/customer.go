@@ -167,6 +167,10 @@ func (h handlers) update(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid input"})
 	}
 
+	if updates.Name == nil && updates.Email == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "at least one field (name or email) must be provided"})
+	}
+
 	var customer Customer
 	result := h.DB.Scopes(scopes.ByID(id)).First(&customer)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -176,17 +180,20 @@ func (h handlers) update(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
 	}
 
+	columns := make(map[string]interface{}, 2)
 	if updates.Name != nil {
 		customer.Name = normalizeName(*updates.Name)
+		columns["name"] = customer.Name
 	}
 	if updates.Email != nil {
 		customer.Email = *updates.Email
+		columns["email"] = customer.Email
 	}
 	if err := validateRequired(customer.Name, customer.Email); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	if err := h.DB.Save(&customer).Error; err != nil {
+	if err := h.DB.Model(&customer).UpdateColumns(columns).Error; err != nil {
 		mapped := mapUpdateError(err)
 
 		status := http.StatusInternalServerError
