@@ -399,7 +399,7 @@ func TestUpdate_DuplicateEmailReturnsConflict(t *testing.T) {
 		WithArgs(id, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
 			AddRow(id, "Mary Smith", "old@example.com"))
-	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "customers"\."id" = \$2`).
+	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "id" = \$2`).
 		WithArgs("mary@gmail.com", id).
 		WillReturnError(&pq.Error{Code: "23505"})
 
@@ -422,7 +422,7 @@ func TestUpdate_EmailOnlyPreservesOtherFields(t *testing.T) {
 		WithArgs(id, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
 			AddRow(id, "Mary Smith", "old@example.com"))
-	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "customers"\."id" = \$2`).
+	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "id" = \$2`).
 		WithArgs("new@example.com", id).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -452,7 +452,7 @@ func TestUpdate_NameAndEmail(t *testing.T) {
 		WithArgs(id, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
 			AddRow(id, "Mary Smith", "old@example.com"))
-	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1,"name"=\$2 WHERE "customers"\."id" = \$3`).
+	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1,"name"=\$2 WHERE "id" = \$3`).
 		WithArgs("new@example.com", "Mary Jones", id).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -522,7 +522,7 @@ func TestUpdate_NameOnlyPreservesExistingEmail(t *testing.T) {
 		WithArgs(id, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
 			AddRow(id, "Mary Smith", "mary@example.com"))
-	mock.ExpectExec(`UPDATE "customers" SET "name"=\$1 WHERE "customers"\."id" = \$2`).
+	mock.ExpectExec(`UPDATE "customers" SET "name"=\$1 WHERE "id" = \$2`).
 		WithArgs("Alice", id).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -552,7 +552,7 @@ func TestUpdate_CurrentEmailReturnsOK(t *testing.T) {
 		WithArgs(id, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
 			AddRow(id, "Mary Smith", "mary@example.com"))
-	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "customers"\."id" = \$2`).
+	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "id" = \$2`).
 		WithArgs("mary@example.com", id).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -664,7 +664,7 @@ func TestUpdate_SaveDatabaseFailure(t *testing.T) {
 		WithArgs(id, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
 			AddRow(id, "Mary Smith", "old@example.com"))
-	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "customers"\."id" = \$2`).
+	mock.ExpectExec(`UPDATE "customers" SET "email"=\$1 WHERE "id" = \$2`).
 		WithArgs("new@example.com", id).
 		WillReturnError(errors.New("connection refused"))
 
