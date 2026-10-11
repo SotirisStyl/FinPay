@@ -247,6 +247,9 @@ func (h handlers) delete(c echo.Context) error {
 			"error": mapped.Error(),
 		})
 	}
+	if update.RowsAffected == 0 {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errAlreadyDeleted.Error()})
+	}
 
-	return c.JSON(http.StatusNoContent, customer)
+	return c.NoContent(http.StatusNoContent)
 }
