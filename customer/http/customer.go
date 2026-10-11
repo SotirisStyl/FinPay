@@ -23,6 +23,7 @@ var (
 	errCustomerNotFound      = errors.New("customer does not exist")
 	errInvalidUuid           = errors.New("invalid uuid")
 	errCustomerAlreadyExists = errors.New("customer already exist")
+	errAlreadyDeleted        = errors.New("already deleted")
 )
 
 type Customer struct {
@@ -207,4 +208,48 @@ func (h handlers) update(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, customer)
+}
+
+func (h handlers) delete(c echo.Context) error {
+	var customer Customer
+	id := c.Param("id")
+
+	if err := uuid.Validate(id); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidUuid.Error()})
+	}
+
+	notExist := h.DB.Scopes(scopes.ByID(id)).First(&customer)
+	if errors.Is(notExist.Error, gorm.ErrRecordNotFound) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errCustomerNotFound.Error()})
+	}
+	if notExist.Error != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+
+	alreadyDeleted := h.DB.Scopes(scopes.ByDeletedAt(id)).First(&customer)
+	if errors.Is(alreadyDeleted.Error, gorm.ErrRecordNotFound) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errAlreadyDeleted.Error()})
+	}
+	if alreadyDeleted.Error != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+
+	update := h.DB.Model(&Customer{}).Scopes(scopes.ByDeletedAt(id)).UpdateColumn("deleted_at", gorm.Expr("CURRENT_TIMESTAMP"))
+	if err := update.Error; err != nil {
+		mapped := mapUpdateError(err)
+
+		status := http.StatusInternalServerError
+		if errors.Is(mapped, errEmailExists) {
+			status = http.StatusConflict
+		}
+
+		return c.JSON(status, map[string]string{
+			"error": mapped.Error(),
+		})
+	}
+	if update.RowsAffected == 0 {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errAlreadyDeleted.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }

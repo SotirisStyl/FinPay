@@ -288,6 +288,23 @@ func patchCustomer(t *testing.T, h handlers, id, body string) *httptest.Response
 	return rec
 }
 
+func requestDeleteCustomer(t *testing.T, h handlers, id string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodDelete, "/customers/"+id, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/customers/:id")
+	c.SetParamNames("id")
+	c.SetParamValues(id)
+
+	if err := h.delete(c); err != nil {
+		t.Fatalf("delete returned error: %v", err)
+	}
+	return rec
+}
+
 func TestGet_CustomerFound(t *testing.T) {
 	const id = "11111111-1111-4111-8111-111111111111"
 
@@ -675,6 +692,165 @@ func TestUpdate_SaveDatabaseFailure(t *testing.T) {
 	}
 	if got := errorBody(t, rec); got != errInternal.Error() {
 		t.Errorf("error = %q, want %q", got, errInternal.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_ActiveCustomer(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE \(customers.id = \$1 AND customers.deleted_at IS NULL\) AND "customers"."id" = \$2 ORDER BY "customers"."id" LIMIT \$3`).
+		WithArgs(id, id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET "deleted_at"=CURRENT_TIMESTAMP WHERE customers.id = \$1 AND customers.deleted_at IS NULL`).
+		WithArgs(id).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if got := rec.Body.String(); got != "" {
+		t.Errorf("body = %q, want empty", got)
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_NonExistentCustomer(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}))
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := errorBody(t, rec); got != errCustomerNotFound.Error() {
+		t.Errorf("error = %q, want %q", got, errCustomerNotFound.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_InvalidUUID(t *testing.T) {
+	const id = "test"
+
+	h, mock := newTestHandlers(t)
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+
+	if got := errorBody(t, rec); got != "invalid uuid" {
+		t.Errorf("error = %q, want %q", got, "invalid uuid")
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_DatabaseFailure(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := errorBody(t, rec); got != errInternal.Error() {
+		t.Errorf("error = %q, want %q", got, errInternal.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_UpdateFailure(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE \(customers.id = \$1 AND customers.deleted_at IS NULL\) AND "customers"."id" = \$2 ORDER BY "customers"."id" LIMIT \$3`).
+		WithArgs(id, id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET "deleted_at"=CURRENT_TIMESTAMP WHERE customers.id = \$1 AND customers.deleted_at IS NULL`).
+		WithArgs(id).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := errorBody(t, rec); got != errInternal.Error() {
+		t.Errorf("error = %q, want %q", got, errInternal.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_UpdateAffectsNoRows(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE \(customers.id = \$1 AND customers.deleted_at IS NULL\) AND "customers"."id" = \$2 ORDER BY "customers"."id" LIMIT \$3`).
+		WithArgs(id, id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectExec(`UPDATE "customers" SET "deleted_at"=CURRENT_TIMESTAMP WHERE customers.id = \$1 AND customers.deleted_at IS NULL`).
+		WithArgs(id).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := errorBody(t, rec); got != errAlreadyDeleted.Error() {
+		t.Errorf("error = %q, want %q", got, errAlreadyDeleted.Error())
+	}
+	assertMockMet(t, mock)
+}
+
+func TestDelete_AlreadyDeletedCustomer(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+
+	h, mock := newTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "customers"`).
+		WithArgs(id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}).
+			AddRow(id, "Test User", "test@example.com"))
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE \(customers.id = \$1 AND customers.deleted_at IS NULL\) AND "customers"."id" = \$2 ORDER BY "customers"."id" LIMIT \$3`).
+		WithArgs(id, id, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "email"}))
+
+	rec := requestDeleteCustomer(t, h, id)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if got := errorBody(t, rec); got != errAlreadyDeleted.Error() {
+		t.Errorf("error = %q, want %q", got, errAlreadyDeleted.Error())
 	}
 	assertMockMet(t, mock)
 }
