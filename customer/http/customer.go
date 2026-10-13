@@ -12,6 +12,7 @@ import (
 
 	"FinPay/config"
 	"FinPay/customer/scopes"
+	models "FinPay/models"
 	"FinPay/services"
 )
 
@@ -25,17 +26,6 @@ var (
 	errCustomerAlreadyExists = errors.New("customer already exist")
 	errAlreadyDeleted        = errors.New("already deleted")
 )
-
-type Customer struct {
-	ID    string `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	Name  string `gorm:"not null" json:"name"`
-	Email string `gorm:"uniqueIndex;not null" json:"email"`
-}
-
-type customerUpdate struct {
-	Name  *string `json:"name"`
-	Email *string `json:"email"`
-}
 
 type handlers struct {
 	DB         *gorm.DB
@@ -104,7 +94,7 @@ func isUniqueViolation(err error) bool {
 }
 
 func (h handlers) create(c echo.Context) error {
-	var customer Customer
+	var customer models.Customer
 
 	if err := c.Bind(&customer); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{
@@ -137,7 +127,7 @@ func (h handlers) create(c echo.Context) error {
 }
 
 func (h handlers) get(c echo.Context) error {
-	var customer Customer
+	var customer models.Customer
 	id := c.Param("id")
 
 	if err := uuid.Validate(id); err != nil {
@@ -157,7 +147,7 @@ func (h handlers) get(c echo.Context) error {
 }
 
 func (h handlers) update(c echo.Context) error {
-	var updates customerUpdate
+	var updates models.CustomerUpdate
 	id := c.Param("id")
 
 	if err := uuid.Validate(id); err != nil {
@@ -172,7 +162,7 @@ func (h handlers) update(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "at least one field (name or email) must be provided"})
 	}
 
-	var customer Customer
+	var customer models.Customer
 	result := h.DB.Scopes(scopes.ByID(id)).First(&customer)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": errCustomerNotFound.Error()})
@@ -211,7 +201,7 @@ func (h handlers) update(c echo.Context) error {
 }
 
 func (h handlers) delete(c echo.Context) error {
-	var customer Customer
+	var customer models.Customer
 	id := c.Param("id")
 
 	if err := uuid.Validate(id); err != nil {
@@ -234,7 +224,7 @@ func (h handlers) delete(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
 	}
 
-	update := h.DB.Model(&Customer{}).Scopes(scopes.ByDeletedAt(id)).UpdateColumn("deleted_at", gorm.Expr("CURRENT_TIMESTAMP"))
+	update := h.DB.Model(&models.Customer{}).Scopes(scopes.ByDeletedAt(id)).UpdateColumn("deleted_at", gorm.Expr("CURRENT_TIMESTAMP"))
 	if err := update.Error; err != nil {
 		mapped := mapUpdateError(err)
 

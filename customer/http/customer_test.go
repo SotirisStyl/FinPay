@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	models "FinPay/models"
+
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo"
 	"github.com/lib/pq"
@@ -160,7 +162,7 @@ func TestCreate_Success(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
 	}
 
-	var got Customer
+	var got models.Customer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid customer JSON: %v", err)
 	}
@@ -320,7 +322,7 @@ func TestGet_CustomerFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	var got Customer
+	var got models.Customer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid customer JSON: %v", err)
 	}
@@ -448,7 +450,7 @@ func TestUpdate_EmailOnlyPreservesOtherFields(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var got Customer
+	var got models.Customer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid customer JSON: %v", err)
 	}
@@ -478,7 +480,7 @@ func TestUpdate_NameAndEmail(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var got Customer
+	var got models.Customer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid customer JSON: %v", err)
 	}
@@ -548,7 +550,7 @@ func TestUpdate_NameOnlyPreservesExistingEmail(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var got Customer
+	var got models.Customer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid customer JSON: %v", err)
 	}
@@ -578,7 +580,7 @@ func TestUpdate_CurrentEmailReturnsOK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	var got Customer
+	var got models.Customer
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("response is not valid customer JSON: %v", err)
 	}

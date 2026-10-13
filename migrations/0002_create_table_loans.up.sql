@@ -1,0 +1,9 @@
+CREATE TABLE LOANS (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP,
+    amount DECIMAL(10, 2) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    customer_id UUID NOT NULL REFERENCES CUSTOMERS(id)
+);
