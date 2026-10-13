@@ -54,13 +54,13 @@ func getCustomerLoans(t *testing.T, h handlers, customerID string) *httptest.Res
 }
 
 func expectCustomerExists(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE "customers"\."id" = \$1 AND "customers"\."deleted_at" IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE customers\.id = \$1 AND customers\.deleted_at IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
 		WithArgs(testCustomerID, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deleted_at"}).AddRow(testCustomerID, nil))
 }
 
 func expectLoanQuery(mock sqlmock.Sqlmock, rows *sqlmock.Rows) {
-	mock.ExpectQuery(`SELECT .* FROM "loans" INNER JOIN "customers" "Customer" ON "loans"\."customer_id" = "Customer"\."id" AND "Customer"\."deleted_at" IS NULL WHERE "loans"\."customer_id" = \$1`).
+	mock.ExpectQuery(`SELECT \* FROM "loans" WHERE "loans"\."customer_id" = \$1`).
 		WithArgs(testCustomerID).
 		WillReturnRows(rows)
 }
@@ -75,9 +75,8 @@ func assertLoanMockMet(t *testing.T, mock sqlmock.Sqlmock) {
 func TestGetCustomerLoans_Success(t *testing.T) {
 	h, mock := newLoanTestHandlers(t)
 	expectCustomerExists(mock)
-	expectLoanQuery(mock, sqlmock.NewRows([]string{
-		"id", "customer_id", "amount", "status", "Customer__id", "Customer__deleted_at",
-	}).AddRow("22222222-2222-4222-8222-222222222222", testCustomerID, 125.50, "approved", testCustomerID, nil))
+	expectLoanQuery(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}).
+		AddRow("22222222-2222-4222-8222-222222222222", testCustomerID, 125.50, "approved"))
 
 	rec := getCustomerLoans(t, h, testCustomerID)
 	if rec.Code != http.StatusOK {
@@ -100,9 +99,7 @@ func TestGetCustomerLoans_Success(t *testing.T) {
 func TestGetCustomerLoans_NoLoans(t *testing.T) {
 	h, mock := newLoanTestHandlers(t)
 	expectCustomerExists(mock)
-	expectLoanQuery(mock, sqlmock.NewRows([]string{
-		"id", "customer_id", "amount", "status", "Customer__id", "Customer__deleted_at",
-	}))
+	expectLoanQuery(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}))
 
 	rec := getCustomerLoans(t, h, testCustomerID)
 	if rec.Code != http.StatusOK {
@@ -116,7 +113,7 @@ func TestGetCustomerLoans_NoLoans(t *testing.T) {
 
 func TestGetCustomerLoans_CustomerNotFound(t *testing.T) {
 	h, mock := newLoanTestHandlers(t)
-	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE "customers"\."id" = \$1 AND "customers"\."deleted_at" IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE customers\.id = \$1 AND customers\.deleted_at IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
 		WithArgs(testCustomerID, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deleted_at"}))
 
@@ -139,7 +136,7 @@ func TestGetCustomerLoans_InvalidUUID(t *testing.T) {
 
 func TestGetCustomerLoans_CustomerQueryFailure(t *testing.T) {
 	h, mock := newLoanTestHandlers(t)
-	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE "customers"\."id" = \$1 AND "customers"\."deleted_at" IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
+	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE customers\.id = \$1 AND customers\.deleted_at IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
 		WithArgs(testCustomerID, 1).
 		WillReturnError(errors.New("connection refused"))
 
@@ -153,7 +150,7 @@ func TestGetCustomerLoans_CustomerQueryFailure(t *testing.T) {
 func TestGetCustomerLoans_LoanQueryFailure(t *testing.T) {
 	h, mock := newLoanTestHandlers(t)
 	expectCustomerExists(mock)
-	mock.ExpectQuery(`SELECT .* FROM "loans" INNER JOIN "customers" "Customer" ON "loans"\."customer_id" = "Customer"\."id" AND "Customer"\."deleted_at" IS NULL WHERE "loans"\."customer_id" = \$1`).
+	mock.ExpectQuery(`SELECT \* FROM "loans" WHERE "loans"\."customer_id" = \$1`).
 		WithArgs(testCustomerID).
 		WillReturnError(errors.New("connection refused"))
 

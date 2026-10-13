@@ -2,6 +2,7 @@ package http
 
 import (
 	"FinPay/config"
+	"FinPay/loan/scopes"
 	"FinPay/services"
 	"errors"
 	"net/http"
@@ -35,7 +36,7 @@ func (h handlers) getCustomerLoans(c echo.Context) error {
 	}
 
 	var customer models.Customer
-	result := h.DB.Where(&models.Customer{ID: customerID}).First(&customer)
+	result := h.DB.Scopes(scopes.ByCustomerID(customerID)).First(&customer)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": errLoanCustomerNotFound.Error()})
 	}
@@ -44,9 +45,7 @@ func (h handlers) getCustomerLoans(c echo.Context) error {
 	}
 
 	loans := make([]models.Loan, 0)
-	if err := h.DB.InnerJoins("Customer").
-		Where(&models.Loan{CustomerID: customerID}).
-		Find(&loans).Error; err != nil {
+	if err := h.DB.Model(&customer).Association("Loans").Find(&loans); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
 	}
 
