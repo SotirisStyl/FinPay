@@ -15,6 +15,7 @@ import (
 
 	"FinPay/config"
 	custhttp "FinPay/customer/http"
+	loanhttp "FinPay/loan/http"
 )
 
 func newRouter(db *sql.DB) http.Handler {
@@ -37,10 +38,12 @@ func newRouter(db *sql.DB) http.Handler {
 	e.Use(middleware.Recover())
 
 	customerHandlers := custhttp.NewHandlers(gormDB, config.CoreConfig{})
+	loanHandlers := loanhttp.NewHandlers(gormDB, config.CoreConfig{})
 
 	api := e.Group("/api")
 
 	customerHandlers.CreateAuthenticatedEndpoints(api)
+	loanHandlers.CreateAuthenticatedEndpoints(api)
 
 	return e
 }
