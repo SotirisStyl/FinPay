@@ -57,6 +57,28 @@ This project emphasizes:
 - Explicit handling of soft deletion and customer–loan relationships.
 - Small, reviewable pull requests.
 
+
+## Architecture
+
+```mermaid
+flowchart TD
+    Client["HTTP Client<br/>Postman / curl"]
+    Routes["Echo Routes<br/>/api"]
+    Handlers["HTTP Handlers<br/>Validation & HTTP Responses"]
+    Models["Models & Database Queries<br/>GORM"]
+    DB[("PostgreSQL<br/>customers · loans")]
+    Migrations["SQL Migrations"]
+    Tests["Go Tests<br/>httptest · sqlmock"]
+
+    Client --> Routes
+    Routes --> Handlers
+    Handlers --> Models
+    Models --> DB
+    Migrations -. "Define schema" .-> DB
+    Tests -. "Test API behavior" .-> Handlers
+    Tests -. "Mock database calls" .-> Models
+```
+
 ## Getting Started
 
 ### Prerequisites
