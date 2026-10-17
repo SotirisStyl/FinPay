@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -22,9 +23,12 @@ var (
 	errInternal             = errors.New("internal server error")
 	errAmountRequired       = errors.New("amount is required")
 	errInvalidAmount        = errors.New("amount must be greater than 0")
+	errAmountPrecision      = errors.New("amount must not have more than 2 decimal places")
+	errAmountTooLarge       = errors.New("amount exceeds the maximum allowed value")
 	errStatusInJSON         = errors.New("status should not be given for loan")
 	errLoanExists           = errors.New("loan already exists")
 	errInvalidOutput        = errors.New("invalid output")
+	maxLoanAmount           = decimal.RequireFromString("99999999.99")
 )
 
 type handlers struct {
@@ -108,6 +112,12 @@ func (h handlers) createCustomerLoan(c echo.Context) error {
 	}
 	if !request.Amount.IsPositive() {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidAmount.Error()})
+	}
+	if !request.Amount.Equal(request.Amount.Round(2)) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errAmountPrecision.Error()})
+	}
+	if request.Amount.GreaterThan(maxLoanAmount) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errAmountTooLarge.Error()})
 	}
 	if request.Status != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": errStatusInJSON.Error()})

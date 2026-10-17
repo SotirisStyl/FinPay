@@ -188,7 +188,7 @@ func TestCreateCustomerLoan_Success(t *testing.T) {
 		WithArgs(testCustomerID, sqlmock.AnyArg(), string(models.LoanStatusPending)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("22222222-2222-4222-8222-222222222222"))
 
-	rec := postCustomerLoan(t, h, testCustomerID, `{"amount":125.50}`)
+	rec := postCustomerLoan(t, h, testCustomerID, `{"amount":125.5000}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
@@ -276,6 +276,26 @@ func TestCreateCustomerLoan_NonPositiveAmount(t *testing.T) {
 			assertLoanMockMet(t, mock)
 		})
 	}
+}
+
+func TestCreateCustomerLoan_AmountHasMoreThanTwoFractionalDigits(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+
+	rec := postCustomerLoan(t, h, testCustomerID, `{"amount":1.234}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestCreateCustomerLoan_AmountExceedsDatabasePrecision(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+
+	rec := postCustomerLoan(t, h, testCustomerID, `{"amount":100000000}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	assertLoanMockMet(t, mock)
 }
 
 func TestCreateCustomerLoan_StatusNotAccepted(t *testing.T) {
