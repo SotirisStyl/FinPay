@@ -3,7 +3,7 @@ package http
 import "github.com/labstack/echo"
 
 const (
-	getLoans = "/customers/:id/loans"
+	getLoans  = "/customers/:id/loans"
 	postLoans = "/customers/:id/loans"
 )
 
