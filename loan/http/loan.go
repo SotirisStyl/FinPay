@@ -33,7 +33,7 @@ var (
 	errStatusRequired       = errors.New("status is required")
 	errInvalidLoanStatus    = errors.New("invalid loan status")
 	errInvalidTransition    = errors.New("invalid loan status transition")
-	errAlreadyUpdated       = errors.New("already updated")
+	errAlreadyUpdated       = errors.New("Loan status has changed. Please refresh and try again.")
 )
 
 type handlers struct {
@@ -185,7 +185,7 @@ func (h handlers) updateLoan(c echo.Context) error {
 	loanID := c.Param("id")
 	var loan models.Loan
 	if err := uuid.Validate(loanID); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": errInvalidUUID.Error()})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidUUID.Error()})
 	}
 
 	decoder := json.NewDecoder(c.Request().Body)

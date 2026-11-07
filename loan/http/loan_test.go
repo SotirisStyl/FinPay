@@ -423,8 +423,8 @@ func TestUpdateLoanStatus_InvalidUUID(t *testing.T) {
 	h, mock := newLoanTestHandlers(t)
 
 	rec := patchLoanStatus(t, h, "not-a-uuid", `{"status":"APPROVED"}`)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 	assertLoanMockMet(t, mock)
 }
@@ -537,6 +537,9 @@ func TestUpdateLoanStatus_ConcurrentChange(t *testing.T) {
 	rec := patchLoanStatus(t, h, testLoanID, `{"status":"APPROVED"}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !strings.Contains(rec.Body.String(), "Loan status has changed. Please refresh and try again.") {
+		t.Errorf("response body = %s, want concurrent update message", rec.Body.String())
 	}
 	assertLoanMockMet(t, mock)
 }
