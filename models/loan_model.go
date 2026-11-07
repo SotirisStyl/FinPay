@@ -28,3 +28,7 @@ type CreateLoanRequest struct {
 	Amount *decimal.Decimal `json:"amount"`
 	Status json.RawMessage  `json:"status"`
 }
+
+type UpdateLoan struct {
+	Status *LoanStatus `json:"status"`
+}

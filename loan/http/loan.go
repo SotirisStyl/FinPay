@@ -29,6 +29,11 @@ var (
 	errLoanExists           = errors.New("loan already exists")
 	errInvalidOutput        = errors.New("invalid output")
 	maxLoanAmount           = decimal.RequireFromString("99999999.99")
+	errLoanDoesNotExist     = errors.New("loan does not exist")
+	errStatusRequired       = errors.New("status is required")
+	errInvalidLoanStatus    = errors.New("invalid loan status")
+	errInvalidTransition    = errors.New("invalid loan status transition")
+	errAlreadyUpdated       = errors.New("already updated")
 )
 
 type handlers struct {
@@ -57,6 +62,29 @@ func isUniqueViolation(err error) bool {
 		SQLState() string
 	}
 	return errors.As(err, &sqlStateErr) && sqlStateErr.SQLState() == "23505"
+}
+
+func canTransitionLoanStatus(from, to models.LoanStatus) bool {
+	switch from {
+	case models.LoanStatusPending:
+		return to == models.LoanStatusApproved || to == models.LoanStatusRejected
+	case models.LoanStatusApproved:
+		return to == models.LoanStatusActive
+	case models.LoanStatusActive:
+		return to == models.LoanStatusPaidOff
+	default:
+		return false
+	}
+}
+
+func isValidLoanStatus(status models.LoanStatus) bool {
+	switch status {
+	case models.LoanStatusPending, models.LoanStatusApproved, models.LoanStatusRejected,
+		models.LoanStatusActive, models.LoanStatusPaidOff:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h handlers) getCustomerLoans(c echo.Context) error {
@@ -151,4 +179,58 @@ func (h handlers) createCustomerLoan(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusCreated, loan)
+}
+
+func (h handlers) updateLoan(c echo.Context) error {
+	loanID := c.Param("id")
+	var loan models.Loan
+	if err := uuid.Validate(loanID); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errInvalidUUID.Error()})
+	}
+
+	decoder := json.NewDecoder(c.Request().Body)
+	decoder.DisallowUnknownFields()
+
+	var request models.UpdateLoan
+	if err := decoder.Decode(&request); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidOutput.Error()})
+	}
+
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidOutput.Error()})
+	}
+
+	if request.Status == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errStatusRequired.Error()})
+	}
+	if !isValidLoanStatus(*request.Status) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errInvalidLoanStatus.Error()})
+	}
+
+	result := h.DB.Scopes(scopes.ByLoanID(loanID)).First(&loan)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": errLoanDoesNotExist.Error()})
+	}
+	if result.Error != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+
+	currentStatus := models.LoanStatus(loan.Status)
+	if !canTransitionLoanStatus(currentStatus, *request.Status) {
+		return c.JSON(http.StatusConflict, map[string]string{"error": errInvalidTransition.Error()})
+	}
+
+	update := h.DB.Model(&models.Loan{}).
+		Where(&models.Loan{ID: loanID, Status: string(currentStatus)}).
+		UpdateColumn("Status", *request.Status)
+	if update.Error != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": errInternal.Error()})
+	}
+	if update.RowsAffected == 0 {
+		return c.JSON(http.StatusConflict, map[string]string{"error": errAlreadyUpdated.Error()})
+	}
+
+	loan.Status = string(*request.Status)
+	return c.JSON(http.StatusOK, loan)
 }

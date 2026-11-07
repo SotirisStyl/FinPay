@@ -7,3 +7,9 @@ func ByCustomerID(customerID string) func(*gorm.DB) *gorm.DB {
 		return db.Where("customers.id = ? AND customers.deleted_at IS NULL", customerID)
 	}
 }
+
+func ByLoanID(loanID string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where("loans.id = ?", loanID)
+	}
+}
