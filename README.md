@@ -19,6 +19,7 @@ The project is being developed incrementally, with features implemented through 
 ### Loan management
 - Model loans and their relationship to customers.
 - Retrieve loans belonging to a customer.
+- Transition loan statuses through the allowed lifecycle.
 - Use PostgreSQL decimal storage for monetary amounts.
 - Exclude loans associated with soft-deleted customers where applicable.
 
@@ -43,8 +44,13 @@ The API is mounted under `/api`.
 | `PATCH` | `/api/customers/:id` | Partially update a customer |
 | `DELETE` | `/api/customers/:id` | Soft-delete a customer |
 | `GET` | `/api/customers/:id/loans` | Retrieve a customer's loans |
+| `PATCH` | `/api/loans/:id/status` | Transition a loan to its next status |
 
 Customer IDs are UUIDs. The API validates incoming requests and distinguishes client errors, missing records, and unexpected server errors.
+
+Loan status updates require a JSON `status` field. Allowed transitions are
+`PENDING` to `APPROVED` or `REJECTED`, `APPROVED` to `ACTIVE`, and `ACTIVE`
+to `PAID_OFF`. Invalid transitions return `409 Conflict`.
 
 ## Engineering Practices
 

@@ -17,7 +17,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const testCustomerID = "11111111-1111-4111-8111-111111111111"
+const (
+	testCustomerID = "11111111-1111-4111-8111-111111111111"
+	testLoanID     = "22222222-2222-4222-8222-222222222222"
+)
 
 func newLoanTestHandlers(t *testing.T) (handlers, sqlmock.Sqlmock) {
 	t.Helper()
@@ -73,10 +76,34 @@ func postCustomerLoan(t *testing.T, h handlers, customerID, body string) *httpte
 	return rec
 }
 
+func patchLoanStatus(t *testing.T, h handlers, loanID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPatch, "/loans/"+loanID+"/status", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/loans/:id/status")
+	c.SetParamNames("id")
+	c.SetParamValues(loanID)
+
+	if err := h.updateLoan(c); err != nil {
+		t.Fatalf("updateLoan returned error: %v", err)
+	}
+	return rec
+}
+
 func expectCustomerExists(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(`SELECT \* FROM "customers" WHERE customers\.id = \$1 AND customers\.deleted_at IS NULL ORDER BY "customers"\."id" LIMIT \$2`).
 		WithArgs(testCustomerID, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "deleted_at"}).AddRow(testCustomerID, nil))
+}
+
+func expectLoanByID(mock sqlmock.Sqlmock, rows *sqlmock.Rows) {
+	mock.ExpectQuery(`SELECT \* FROM "loans" WHERE loans\.id = \$1 ORDER BY "loans"\."id" LIMIT \$2`).
+		WithArgs(testLoanID, 1).
+		WillReturnRows(rows)
 }
 
 func expectLoanQuery(mock sqlmock.Sqlmock, rows *sqlmock.Rows) {
@@ -351,6 +378,168 @@ func TestCreateCustomerLoan_LoanCreationFailure(t *testing.T) {
 	rec := postCustomerLoan(t, h, testCustomerID, `{"amount":10}`)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_ValidTransition(t *testing.T) {
+	tests := []struct {
+		from models.LoanStatus
+		to   models.LoanStatus
+	}{
+		{models.LoanStatusPending, models.LoanStatusApproved},
+		{models.LoanStatusPending, models.LoanStatusRejected},
+		{models.LoanStatusApproved, models.LoanStatusActive},
+		{models.LoanStatusActive, models.LoanStatusPaidOff},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.from)+"_to_"+string(tt.to), func(t *testing.T) {
+			h, mock := newLoanTestHandlers(t)
+			expectLoanByID(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}).
+				AddRow(testLoanID, testCustomerID, 125.50, string(tt.from)))
+			mock.ExpectExec(`UPDATE "loans" SET "status"=\$1 WHERE "loans"\."id" = \$2 AND "loans"\."status" = \$3`).
+				WithArgs(tt.to, testLoanID, tt.from).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			rec := patchLoanStatus(t, h, testLoanID, `{"status":"`+string(tt.to)+`"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+
+			var loan models.Loan
+			if err := json.Unmarshal(rec.Body.Bytes(), &loan); err != nil {
+				t.Fatalf("response is not valid loan JSON: %v", err)
+			}
+			if loan.Status != string(tt.to) {
+				t.Errorf("status = %q, want %q", loan.Status, tt.to)
+			}
+			assertLoanMockMet(t, mock)
+		})
+	}
+}
+
+func TestUpdateLoanStatus_InvalidUUID(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+
+	rec := patchLoanStatus(t, h, "not-a-uuid", `{"status":"APPROVED"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestCanTransitionLoanStatus(t *testing.T) {
+	tests := []struct {
+		from models.LoanStatus
+		to   models.LoanStatus
+		want bool
+	}{
+		{models.LoanStatusPending, models.LoanStatusApproved, true},
+		{models.LoanStatusPending, models.LoanStatusRejected, true},
+		{models.LoanStatusApproved, models.LoanStatusActive, true},
+		{models.LoanStatusActive, models.LoanStatusPaidOff, true},
+		{models.LoanStatusPending, models.LoanStatusActive, false},
+		{models.LoanStatusApproved, models.LoanStatusRejected, false},
+		{models.LoanStatusActive, models.LoanStatusApproved, false},
+		{models.LoanStatusRejected, models.LoanStatusActive, false},
+		{models.LoanStatusPaidOff, models.LoanStatusPending, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.from)+"_to_"+string(tt.to), func(t *testing.T) {
+			if got := canTransitionLoanStatus(tt.from, tt.to); got != tt.want {
+				t.Errorf("canTransitionLoanStatus(%q, %q) = %t, want %t", tt.from, tt.to, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateLoanStatus_InvalidTransition(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+	expectLoanByID(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}).
+		AddRow(testLoanID, testCustomerID, 125.50, string(models.LoanStatusPending)))
+
+	rec := patchLoanStatus(t, h, testLoanID, `{"status":"ACTIVE"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_UnknownStatus(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+
+	rec := patchLoanStatus(t, h, testLoanID, `{"status":"UNKNOWN"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_MissingStatus(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+
+	rec := patchLoanStatus(t, h, testLoanID, `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_LoanNotFound(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+	expectLoanByID(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}))
+
+	rec := patchLoanStatus(t, h, testLoanID, `{"status":"APPROVED"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_LoanQueryFailure(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+	mock.ExpectQuery(`SELECT \* FROM "loans" WHERE loans\.id = \$1 ORDER BY "loans"\."id" LIMIT \$2`).
+		WithArgs(testLoanID, 1).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := patchLoanStatus(t, h, testLoanID, `{"status":"APPROVED"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_UpdateFailure(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+	expectLoanByID(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}).
+		AddRow(testLoanID, testCustomerID, 125.50, string(models.LoanStatusPending)))
+	mock.ExpectExec(`UPDATE "loans" SET "status"=\$1 WHERE "loans"\."id" = \$2 AND "loans"\."status" = \$3`).
+		WithArgs(models.LoanStatusApproved, testLoanID, models.LoanStatusPending).
+		WillReturnError(errors.New("connection refused"))
+
+	rec := patchLoanStatus(t, h, testLoanID, `{"status":"APPROVED"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	assertLoanMockMet(t, mock)
+}
+
+func TestUpdateLoanStatus_ConcurrentChange(t *testing.T) {
+	h, mock := newLoanTestHandlers(t)
+	expectLoanByID(mock, sqlmock.NewRows([]string{"id", "customer_id", "amount", "status"}).
+		AddRow(testLoanID, testCustomerID, 125.50, string(models.LoanStatusPending)))
+	mock.ExpectExec(`UPDATE "loans" SET "status"=\$1 WHERE "loans"\."id" = \$2 AND "loans"\."status" = \$3`).
+		WithArgs(models.LoanStatusApproved, testLoanID, models.LoanStatusPending).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	rec := patchLoanStatus(t, h, testLoanID, `{"status":"APPROVED"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if !strings.Contains(rec.Body.String(), "Loan status has changed. Please refresh and try again.") {
+		t.Errorf("response body = %s, want concurrent update message", rec.Body.String())
 	}
 	assertLoanMockMet(t, mock)
 }
